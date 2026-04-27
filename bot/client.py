@@ -57,29 +57,35 @@ class TopUpBot(commands.Bot):
         logger.info(f"Đồng bộ {count} member vào database.")
 
     async def on_member_join(self, member: discord.Member) -> None:
-        """Tự động thêm member mới khi vào server và gửi tin chào."""
+        """Auto-add new member to DB and send welcome message."""
         if member.bot:
             return
         import services.database as db
-        from config import WELCOME_CHANNEL_ID
+        from config import WELCOME_CHANNEL_ID, RULES_CHANNEL_ID, VERIFY_CHANNEL_ID
         avatar = str(member.display_avatar.url) if member.display_avatar else None
         await db.get_or_create_user(str(member.id), avatar)
-        logger.info(f"Member mới: {member} ({member.id}) đã được thêm vào DB.")
+        logger.info(f"New member: {member} ({member.id}) added to DB.")
 
         if WELCOME_CHANNEL_ID:
             channel = self.get_channel(WELCOME_CHANNEL_ID)
             if channel:
+                rules_mention = f"<#{RULES_CHANNEL_ID}>" if RULES_CHANNEL_ID else "#rules"
+                verify_mention = f"<#{VERIFY_CHANNEL_ID}>" if VERIFY_CHANNEL_ID else "#verify"
                 embed = discord.Embed(
-                    title="👋 Thành viên mới!",
-                    description=f"{member.mention} vừa tham gia server.",
+                    title="👋 Welcome to the server!",
+                    description=(
+                        f"Hey {member.mention}, welcome to **{member.guild.name}**!\n\n"
+                        f"📖 Please read the rules in {rules_mention}\n"
+                        f"✅ Then head over to {verify_mention} to verify and unlock all channels."
+                    ),
                     color=discord.Color.green(),
                 )
                 embed.set_thumbnail(url=member.display_avatar.url if member.display_avatar else None)
-                embed.set_footer(text=f"Thành viên thứ {member.guild.member_count}")
+                embed.set_footer(text=f"Member #{member.guild.member_count}")
                 await channel.send(embed=embed)
 
     async def on_member_remove(self, member: discord.Member) -> None:
-        """Gửi tin khi member rời server."""
+        """Send message when a member leaves."""
         if member.bot:
             return
         from config import WELCOME_CHANNEL_ID
@@ -87,8 +93,8 @@ class TopUpBot(commands.Bot):
             channel = self.get_channel(WELCOME_CHANNEL_ID)
             if channel:
                 embed = discord.Embed(
-                    title="👋 Thành viên rời đi",
-                    description=f"**{member.name}** đã rời server.",
+                    title="👋 Member Left",
+                    description=f"**{member.name}** has left the server.",
                     color=discord.Color.red(),
                 )
                 embed.set_thumbnail(url=member.display_avatar.url if member.display_avatar else None)
