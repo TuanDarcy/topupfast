@@ -27,6 +27,7 @@ async def init_db() -> None:
         min_size=2,
         max_size=10,
         ssl="require",
+        statement_cache_size=0,
     )
     schema_sql = _SCHEMA_PATH.read_text(encoding="utf-8")
     async with _pool.acquire() as conn:
