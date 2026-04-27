@@ -25,11 +25,18 @@ class TopUpBot(commands.Bot):
         if DISCORD_GUILD_ID:
             guild = discord.Object(id=DISCORD_GUILD_ID)
             self.tree.copy_global_to(guild=guild)
-            await self.tree.sync(guild=guild)
-            logger.info(f"Slash commands synced đến guild {DISCORD_GUILD_ID}")
+            try:
+                await self.tree.sync(guild=guild)
+                logger.info(f"Slash commands synced to guild {DISCORD_GUILD_ID}")
+            except discord.errors.Forbidden:
+                logger.warning(
+                    f"Cannot sync to guild {DISCORD_GUILD_ID} (bot not in guild or missing access). "
+                    "Falling back to global sync (may take up to 1 hour)."
+                )
+                await self.tree.sync()
         else:
             await self.tree.sync()
-            logger.info("Slash commands synced toàn cục (có thể mất tới 1 giờ)")
+            logger.info("Slash commands synced globally (may take up to 1 hour)")
 
     async def on_ready(self) -> None:
         logger.info(f"Đăng nhập: {self.user} (ID: {self.user.id})")
