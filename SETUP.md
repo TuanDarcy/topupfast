@@ -90,6 +90,7 @@ PAYMENT_EXPIRY_MINUTES=30
 ```
 
 Hoặc mở Notepad để điền tay:
+
 ```powershell
 notepad C:\Users\Administrator\Desktop\topupfast\.env
 ```

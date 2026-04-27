@@ -28,8 +28,9 @@ WEBHOOK_HOST: str = os.getenv("WEBHOOK_HOST", "0.0.0.0")
 WEBHOOK_PORT: int = int(os.getenv("WEBHOOK_PORT", 8080))
 WEBHOOK_BASE_URL: str = os.getenv("WEBHOOK_BASE_URL", "http://localhost:8080").rstrip("/")
 
-# ---- Supabase / PostgreSQL ----
-DATABASE_URL: str = os.getenv("DATABASE_URL", "")
+# ---- Supabase ----
+SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
+SUPABASE_KEY: str = os.getenv("SUPABASE_KEY", "")
 
 # ---- Cài đặt chung ----
 EXCHANGE_RATE: float = float(os.getenv("EXCHANGE_RATE", 26000))   # VND per 1 USD

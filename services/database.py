@@ -1,82 +1,62 @@
 import random
 import string
 from datetime import datetime, timedelta
-from pathlib import Path
-from urllib.parse import urlparse, unquote
 
-import asyncpg
+from supabase import acreate_client, AsyncClient
 
-from config import DATABASE_URL, PAYMENT_EXPIRY_MINUTES
+from config import SUPABASE_URL, SUPABASE_KEY, PAYMENT_EXPIRY_MINUTES
 
-_pool: asyncpg.Pool | None = None
-_SCHEMA_PATH = Path(__file__).parent.parent / "schema.sql"
+_client: AsyncClient | None = None
 
 
 # ------------------------------------------------------------------ init --
 
 async def init_db() -> None:
-    """Tạo connection pool và các bảng nếu chưa có."""
-    global _pool
-    parsed = urlparse(DATABASE_URL)
-    _pool = await asyncpg.create_pool(
-        host=parsed.hostname,
-        port=parsed.port or 5432,
-        user=parsed.username,
-        password=unquote(parsed.password or ""),
-        database=parsed.path.lstrip("/"),
-        min_size=2,
-        max_size=10,
-        ssl="require",
-        statement_cache_size=0,
-    )
-    schema_sql = _SCHEMA_PATH.read_text(encoding="utf-8")
-    async with _pool.acquire() as conn:
-        await conn.execute(schema_sql)
+    """Khởi tạo Supabase client (kết nối qua HTTPS)."""
+    global _client
+    _client = await acreate_client(SUPABASE_URL, SUPABASE_KEY)
 
 
-def _pool_conn():
-    if _pool is None:
+def _db() -> AsyncClient:
+    if _client is None:
         raise RuntimeError("Database chưa được khởi tạo. Gọi init_db() trước.")
-    return _pool.acquire()
+    return _client
 
 
 # ----------------------------------------------------------------- users --
 
 async def get_or_create_user(discord_id: str, avatar_url: str | None = None) -> dict:
-    async with _pool_conn() as conn:
-        row = await conn.fetchrow(
-            "SELECT * FROM users WHERE discord_id = $1", discord_id
-        )
-        if row:
-            user = dict(row)
-            if avatar_url and user.get("avatar_url") != avatar_url:
-                await conn.execute(
-                    "UPDATE users SET avatar_url = $1, updated_at = NOW() WHERE discord_id = $2",
-                    avatar_url, discord_id,
-                )
-            return user
+    res = await _db().table("users").select("*").eq("discord_id", discord_id).execute()
+    if res.data:
+        user = res.data[0]
+        if avatar_url and user.get("avatar_url") != avatar_url:
+            await _db().table("users").update({
+                "avatar_url": avatar_url,
+                "updated_at": datetime.utcnow().isoformat(),
+            }).eq("discord_id", discord_id).execute()
+        return user
 
-        row = await conn.fetchrow(
-            "INSERT INTO users (discord_id, avatar_url) VALUES ($1, $2) RETURNING *",
-            discord_id, avatar_url,
-        )
-        return dict(row)
+    res = await _db().table("users").insert({
+        "discord_id": discord_id,
+        "avatar_url": avatar_url,
+    }).execute()
+    return res.data[0]
 
 
 async def get_user(discord_id: str) -> dict | None:
-    async with _pool_conn() as conn:
-        row = await conn.fetchrow(
-            "SELECT * FROM users WHERE discord_id = $1", discord_id
-        )
-        return dict(row) if row else None
+    res = await _db().table("users").select("*").eq("discord_id", discord_id).execute()
+    return res.data[0] if res.data else None
 
 
 async def add_balance(discord_id: str, amount_usd: float) -> None:
-    async with _pool_conn() as conn:
-        await conn.execute(
-            "UPDATE users SET balance = balance + $1, updated_at = NOW() WHERE discord_id = $2",
-            amount_usd, discord_id,
-        )
+    user = await get_user(discord_id)
+    if user is None:
+        return
+    new_balance = (user.get("balance") or 0.0) + amount_usd
+    await _db().table("users").update({
+        "balance": new_balance,
+        "updated_at": datetime.utcnow().isoformat(),
+    }).eq("discord_id", discord_id).execute()
 
 
 # ------------------------------------------------------------- TFA codes --
@@ -92,8 +72,8 @@ async def create_transaction(
     *,
     discord_id: str,
     user_id: int,
-    type: str,           # 'bank' | 'crypto'
-    provider: str,       # 'sepay' | 'coinremitter'
+    type: str,
+    provider: str,
     amount_usd: float,
     amount_vnd: int = 0,
     currency: str | None = None,
@@ -105,71 +85,71 @@ async def create_transaction(
     discord_channel_id: str | None = None,
     discord_message_id: str | None = None,
 ) -> dict:
-    expires_at = datetime.utcnow() + timedelta(minutes=PAYMENT_EXPIRY_MINUTES)
-    async with _pool_conn() as conn:
-        row = await conn.fetchrow(
-            """INSERT INTO transactions
-               (discord_id, user_id, type, provider, amount_usd, amount_vnd, currency,
-                coin, tfa_code, provider_ref, invoice_url, qr_url,
-                discord_channel_id, discord_message_id, expires_at)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-               RETURNING *""",
-            discord_id, user_id, type, provider, amount_usd, amount_vnd, currency,
-            coin, tfa_code, provider_ref, invoice_url, qr_url,
-            discord_channel_id, discord_message_id, expires_at,
-        )
-        return dict(row)
+    expires_at = (datetime.utcnow() + timedelta(minutes=PAYMENT_EXPIRY_MINUTES)).isoformat()
+    res = await _db().table("transactions").insert({
+        "discord_id": discord_id,
+        "user_id": user_id,
+        "type": type,
+        "provider": provider,
+        "amount_usd": amount_usd,
+        "amount_vnd": amount_vnd,
+        "currency": currency,
+        "coin": coin,
+        "tfa_code": tfa_code,
+        "provider_ref": provider_ref,
+        "invoice_url": invoice_url,
+        "qr_url": qr_url,
+        "discord_channel_id": discord_channel_id,
+        "discord_message_id": discord_message_id,
+        "expires_at": expires_at,
+    }).execute()
+    return res.data[0]
 
 
 async def update_transaction(tx_id: int, **fields) -> None:
     if not fields:
         return
-    fields["updated_at"] = datetime.utcnow()
-    keys = list(fields.keys())
-    values = list(fields.values())
-    set_clause = ", ".join(f"{k} = ${i+1}" for i, k in enumerate(keys))
-    values.append(tx_id)
-    async with _pool_conn() as conn:
-        await conn.execute(
-            f"UPDATE transactions SET {set_clause} WHERE id = ${len(values)}",
-            *values,
-        )
+    fields["updated_at"] = datetime.utcnow().isoformat()
+    await _db().table("transactions").update(fields).eq("id", tx_id).execute()
 
 
 async def get_transaction(tx_id: int) -> dict | None:
-    async with _pool_conn() as conn:
-        row = await conn.fetchrow(
-            "SELECT * FROM transactions WHERE id = $1", tx_id
-        )
-        return dict(row) if row else None
+    res = await _db().table("transactions").select("*").eq("id", tx_id).execute()
+    return res.data[0] if res.data else None
 
 
 async def get_transaction_by_tfa(tfa_code: str) -> dict | None:
-    async with _pool_conn() as conn:
-        row = await conn.fetchrow(
-            """SELECT * FROM transactions
-               WHERE tfa_code = $1 AND status = 'pending'
-               ORDER BY created_at DESC LIMIT 1""",
-            tfa_code,
-        )
-        return dict(row) if row else None
+    res = await (
+        _db().table("transactions")
+        .select("*")
+        .eq("tfa_code", tfa_code)
+        .eq("status", "pending")
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    return res.data[0] if res.data else None
 
 
 async def get_transaction_by_provider_ref(provider_ref: str) -> dict | None:
-    async with _pool_conn() as conn:
-        row = await conn.fetchrow(
-            """SELECT * FROM transactions
-               WHERE provider_ref = $1
-               ORDER BY created_at DESC LIMIT 1""",
-            provider_ref,
-        )
-        return dict(row) if row else None
+    res = await (
+        _db().table("transactions")
+        .select("*")
+        .eq("provider_ref", provider_ref)
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    return res.data[0] if res.data else None
 
 
 async def get_user_transactions(discord_id: str, limit: int = 10) -> list[dict]:
-    async with _pool_conn() as conn:
-        rows = await conn.fetch(
-            "SELECT * FROM transactions WHERE discord_id = $1 ORDER BY created_at DESC LIMIT $2",
-            discord_id, limit,
-        )
-        return [dict(r) for r in rows]
+    res = await (
+        _db().table("transactions")
+        .select("*")
+        .eq("discord_id", discord_id)
+        .order("created_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return res.data or []
