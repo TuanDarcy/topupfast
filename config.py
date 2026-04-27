@@ -6,6 +6,7 @@ load_dotenv()
 # ---- Discord ----
 DISCORD_TOKEN: str = os.getenv("DISCORD_TOKEN", "")
 DISCORD_GUILD_ID: int = int(os.getenv("DISCORD_GUILD_ID", 0) or 0)
+WELCOME_CHANNEL_ID: int = int(os.getenv("WELCOME_CHANNEL_ID", 0) or 0)
 
 # ---- SePay ----
 SEPAY_API_TOKEN: str = os.getenv("SEPAY_API_TOKEN", "")

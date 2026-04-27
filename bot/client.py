@@ -57,10 +57,39 @@ class TopUpBot(commands.Bot):
         logger.info(f"Đồng bộ {count} member vào database.")
 
     async def on_member_join(self, member: discord.Member) -> None:
-        """Tự động thêm member mới khi vào server."""
+        """Tự động thêm member mới khi vào server và gửi tin chào."""
         if member.bot:
             return
         import services.database as db
+        from config import WELCOME_CHANNEL_ID
         avatar = str(member.display_avatar.url) if member.display_avatar else None
         await db.get_or_create_user(str(member.id), avatar)
         logger.info(f"Member mới: {member} ({member.id}) đã được thêm vào DB.")
+
+        if WELCOME_CHANNEL_ID:
+            channel = self.get_channel(WELCOME_CHANNEL_ID)
+            if channel:
+                embed = discord.Embed(
+                    title="👋 Thành viên mới!",
+                    description=f"{member.mention} vừa tham gia server.",
+                    color=discord.Color.green(),
+                )
+                embed.set_thumbnail(url=member.display_avatar.url if member.display_avatar else None)
+                embed.set_footer(text=f"Thành viên thứ {member.guild.member_count}")
+                await channel.send(embed=embed)
+
+    async def on_member_remove(self, member: discord.Member) -> None:
+        """Gửi tin khi member rời server."""
+        if member.bot:
+            return
+        from config import WELCOME_CHANNEL_ID
+        if WELCOME_CHANNEL_ID:
+            channel = self.get_channel(WELCOME_CHANNEL_ID)
+            if channel:
+                embed = discord.Embed(
+                    title="👋 Thành viên rời đi",
+                    description=f"**{member.name}** đã rời server.",
+                    color=discord.Color.red(),
+                )
+                embed.set_thumbnail(url=member.display_avatar.url if member.display_avatar else None)
+                await channel.send(embed=embed)
